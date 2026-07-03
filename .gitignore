@@ -1,0 +1,71 @@
+# Byte-compiled / optimized / DLL files
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+bin/
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+.pytest_cache/
+.cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Project-specific credentials & settings (EXCLUDE from git to prevent API/Token leaks)
+**/configs/app_settings.json
+**/configs/telegram_bot.json
+**/configs/app_password.txt
+**/configs/users.json
+**/configs/prompt_store.json
+**/configs/*.json
+**/configs/*.txt
+*.json.bak
+*.bak
+*.rar
+*.zip
+
+# Logs
+*.log
+**/app_stdout.log
+**/app_stderr.log
+
+# Test directories & temp outputs
+/OUTPUT TEST/
+/outputs/
+/TEST LAB/
+/Glossary/
+/scratch/
+**/DEANTRANS_V*/
+%SystemDrive%/
+**/test_ppt_extract/
+
+# Scratch files & patch scripts
+**/patch.py
+**/patch_ppt.py
+**/patch_word.py
+**/word_processor.py
+**/check_en.py
+**/inspect_colors.py
+**/scripts/
+
+# Document data files (EXCLUDE from repository)
+*.xlsx
+*.xls
+*.docx
+*.doc
+*.pptx
+*.ppt

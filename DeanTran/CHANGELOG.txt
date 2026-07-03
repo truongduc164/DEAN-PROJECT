@@ -1,0 +1,64 @@
+﻿LỊCH SỬ CẬP NHẬT (CHANGELOG) - DEANTRANS
+=======================================================
+
+
+[V1.4.1] - 2026-06-13
+[V1.4.3] - 2026-06-16
+---------------------
+* OCR Image Translation hoan chinh cho Word: tim tat ca anh, OCR + dich, tao textbox
+* Vision Context Translation: DeepSeek tu nhom text box theo ngu nghia thay vi dich roi rac
+* Fix loi khong OCR duoc file chi co anh (Word + Excel)
+* Fix loi mat anh sau khi dich Excel
+* Fix loi chi tim thay 1 anh khi file co nhieu anh
+* Hien thi moi text box tren 1 dong rieng trong _OCR_Results (Excel)
+* Word: them VML + header/footer support cho image collection
+* Them per-block textbox overlay cho Word OCR
+
+
+---------------------
+* Rebuild voi ten DEAN, version 1.4.1.
+* Cap nhat build script va version.py.
+[V1.3.2] - 2026-04-16
+---------------------
+* Sửa lỗi nghiêm trọng: Tất cả ô bảng (table cells) bị bỏ qua do CPython tái sử dụng địa chỉ bộ nhớ (id() reuse bug).
+* Hỗ trợ bảng lồng nhau (nested tables): Dịch đầy đủ ô bảng ở mọi cấp độ thay vì chỉ bảng cấp 1.
+* Sửa lỗi Headers/Footers: Không còn tạo XML rỗng khi truy cập header/footer không tồn tại.
+* Cải thiện trích xuất text từ Headers/Footers: Bao gồm cả bảng và textbox bên trong.
+* Thống nhất cơ chế chống trùng lặp (dedup) trên toàn bộ quy trình xử lý Word.
+
+[V1.3.1] - 2026-03-22
+---------------------
+* Sửa lỗi font Excel: Bảo toàn đúng font color, size, family cho text gốc, bản dịch và pinyin khi xử lý file Excel.
+* Xử lý đúng theme colors và styles.xml để giữ nguyên định dạng gốc.
+
+[V1.2.0] - OCR Translation Foundation
+---------------------
+* Bổ sung OCR phát hiện chữ trong ảnh (hỗ trợ trích text từ điểm ảnh và dịch block).
+* Hỗ trợ textbox overlay cho ảnh trong file PowerPoint/Word/Excel.
+* Tái sử dụng cơ chế bảo vệ date/time và token chuyên ngành trong block ảnh để skip qua các token không cần dịch.
+* Bổ sung config OCR trong Admin Settings (cho phép bật/tắt toàn module, chế độ detect_only/overlay/json, max limits).
+* Tăng logging chuyên sâu và fail-safe cho ảnh lỗi (error blocks không làm đổ bể nguyên file).
+
+[V1.1.0] - 2026-03-07
+---------------------
+* Cơ chế bảo vệ ngày/giờ và mã Token (Skip Translation).
+* Quản lý API Key (Key Pool), Round-robin, Auto-rotate. Cho phép nhập nhiều key cùng lúc.
+* Giao diện UI tùy chỉnh giới hạn (Max Items/Chars per Batch, Timeout, Retries, Circuit Breaker).
+* Phân Quyền & Session Timeout (Admin, Operator, User). Admin tự đăng xuất sau 30 phút.
+* Checkpoint Job, Lưu `_stop` Logs (Tự động lưu file .json chứa checkpoint khi dừng / huỷ dịch giữa chừng).
+* Sửa lỗi (bug fix) và tối ưu độ ổn định.
+
+[V1.0.0] - 2026-03-06
+---------------------
+Phiên bản phát hành đầu tiên (First Official Release).
+* Tính năng Dịch Excel:
+  - Dịch theo Batch siêu nhanh.
+  - Hỗ trợ giữ nguyên định dạng, giữ nguyên ảnh sau khi tạo sheet bản sao (ví dụ: Sheet1_Vi).
+* Tính năng Dịch PowerPoint:
+  - Dịch toàn bộ Slide, gom nhóm theo đoạn (paragraph) để giữ ngữ cảnh.
+  - Fix lỗi crash ứng dụng sau khi dịch hoàn tất.
+* Tính năng Dịch Word (đã hỗ trợ nền tảng).
+* Tính năng Thuật Ngữ (Glossary) & Bảo vệ Định dạng bằng Regex.
+* Cấu hình an toàn:
+  - Toàn bộ file Logs, Config, Output được trích xuất ra thư mục riêng biệt giúp người dùng dễ dàng theo dõi.
+  - Không ghi đè mất file gốc (_Vi(1), _Vi(2)).

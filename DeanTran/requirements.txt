@@ -1,0 +1,17 @@
+PySide6
+openpyxl
+python-docx
+python-pptx
+pypinyin
+google-genai
+bcrypt
+keyring
+pytest
+pytesseract
+Pillow
+python-docx
+paddlepaddle
+paddleocr
+google-cloud-vision
+docx2pdf
+docxcompose
