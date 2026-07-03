@@ -71,6 +71,15 @@ class PaddleOcrEngine(BaseOcrEngine):
                     text = str(pred.text).strip() if hasattr(pred, 'text') else ''
                     conf = float(getattr(pred, 'score', 0)) * 100.0
                     
+                    bbox = getattr(pred, 'bbox', None)
+                    if bbox and len(bbox) >= 4:
+                        xs = [p[0] for p in bbox]
+                        ys = [p[1] for p in bbox]
+                        left, top = min(xs), min(ys)
+                        right, bottom = max(xs), max(ys)
+                        w, h = right - left, bottom - top
+                    else:
+                        left, top, w, h = 0, 0, 0, 0
                     
                     segments.append(OcrSegment(
                         id=str(uuid.uuid4()),
@@ -161,6 +170,142 @@ class GoogleVisionOcrEngine(BaseOcrEngine):
 
         return ImageOcrResult(image_id=image_id, blocks=segments, width=width, height=height)
 
+    def _parse_rest_response(self, response_dict: dict, image_id: str, width: int, height: int) -> ImageOcrResult:
+        err = response_dict.get("error")
+        if err and err.get("message"):
+            return ImageOcrResult(image_id=image_id, width=width, height=height, error=err.get("message"))
+
+        segments = []
+        full_text = response_dict.get("fullTextAnnotation")
+        pages = full_text.get("pages", []) if full_text else []
+
+        for page in pages:
+            for block in page.get("blocks", []):
+                for paragraph in block.get("paragraphs", []):
+                    text_parts = []
+                    for word in paragraph.get("words", []):
+                        for symbol in word.get("symbols", []):
+                            text_parts.append(symbol.get("text", ""))
+                        text_parts.append(" ")
+
+                    text = "".join(text_parts).strip()
+                    if not text:
+                        continue
+
+                    vertices = paragraph.get("boundingBox", {}).get("vertices", [])
+                    xs = [v.get("x") for v in vertices if v.get("x") is not None]
+                    ys = [v.get("y") for v in vertices if v.get("y") is not None]
+                    if not xs or not ys:
+                        continue
+
+                    left, top = min(xs), min(ys)
+                    right, bottom = max(xs), max(ys)
+                    w, h = right - left, bottom - top
+
+                    segments.append(OcrSegment(
+                        id=str(uuid.uuid4()),
+                        text=text,
+                        confidence=paragraph.get("confidence", 1.0) * 100.0,
+                        bbox=(int(left), int(top), int(w), int(h)),
+                    ))
+
+        return ImageOcrResult(image_id=image_id, blocks=segments, width=width, height=height)
+
+    def _process_image_bytes_rest(self, image_bytes: bytes, image_id: str) -> ImageOcrResult:
+        import base64
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        key = settings.get("ocr_settings.google_vision_key", "").strip()
+        if not key:
+            return ImageOcrResult(image_id=image_id, error="Google Vision Key is empty")
+
+        url = f"https://vision.googleapis.com/v1/images:annotate?key={key}"
+        img_b64 = base64.b64encode(image_bytes).decode('utf-8')
+        payload = {
+            "requests": [
+                {
+                    "image": {"content": img_b64},
+                    "features": [{"type": "DOCUMENT_TEXT_DETECTION"}]
+                }
+            ]
+        }
+        
+        try:
+            width, height = self._extract_image_size(image_bytes)
+        except Exception:
+            width, height = 0, 0
+
+        try:
+            res = requests.post(url, json=payload, verify=False, timeout=30)
+            if res.status_code != 200:
+                return ImageOcrResult(image_id=image_id, width=width, height=height, error=f"REST API error status: {res.status_code}")
+            
+            res_json = res.json()
+            responses = res_json.get("responses", [])
+            if not responses:
+                return ImageOcrResult(image_id=image_id, width=width, height=height, error="Empty REST responses")
+            
+            return self._parse_rest_response(responses[0], image_id, width, height)
+        except Exception as e:
+            return ImageOcrResult(image_id=image_id, width=width, height=height, error=f"REST fallback failed: {e}")
+
+    def _process_images_batch_rest(self, image_items: list[tuple[str, bytes]]) -> dict[str, ImageOcrResult]:
+        import base64
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        results: dict[str, ImageOcrResult] = {}
+        key = settings.get("ocr_settings.google_vision_key", "").strip()
+        if not key:
+            for image_id, _ in image_items:
+                results[image_id] = ImageOcrResult(image_id=image_id, error="Google Vision Key is empty")
+            return results
+
+        url = f"https://vision.googleapis.com/v1/images:annotate?key={key}"
+        
+        # Build batch requests
+        req_list = []
+        meta_list = []
+        for image_id, image_bytes in image_items:
+            try:
+                width, height = self._extract_image_size(image_bytes)
+            except Exception:
+                width, height = 0, 0
+            
+            img_b64 = base64.b64encode(image_bytes).decode('utf-8')
+            req_list.append({
+                "image": {"content": img_b64},
+                "features": [{"type": "DOCUMENT_TEXT_DETECTION"}]
+            })
+            meta_list.append((image_id, width, height))
+
+        payload = {"requests": req_list}
+
+        try:
+            res = requests.post(url, json=payload, verify=False, timeout=60)
+            if res.status_code != 200:
+                err_msg = f"REST API batch error status: {res.status_code}"
+                for image_id, w, h in meta_list:
+                    results[image_id] = ImageOcrResult(image_id=image_id, width=w, height=h, error=err_msg)
+                return results
+
+            res_json = res.json()
+            responses = res_json.get("responses", [])
+            for idx, (image_id, w, h) in enumerate(meta_list):
+                if idx >= len(responses):
+                    results[image_id] = ImageOcrResult(image_id=image_id, width=w, height=h, error="Missing batch REST response")
+                    continue
+                results[image_id] = self._parse_rest_response(responses[idx], image_id, w, h)
+        except Exception as e:
+            err_msg = f"REST batch fallback failed: {e}"
+            for image_id, w, h in meta_list:
+                results[image_id] = ImageOcrResult(image_id=image_id, width=w, height=h, error=err_msg)
+        
+        return results
+
     def process_image_bytes(
         self, 
         image_bytes: bytes, 
@@ -169,7 +314,6 @@ class GoogleVisionOcrEngine(BaseOcrEngine):
         regions: Optional[List[OcrRegion]] = None
     ) -> ImageOcrResult:
         image_id = image_id or str(uuid.uuid4())
-        # Always run if called, we removed image_ocr_mode dependency for flexibility
             
         try:
             from google.cloud import vision
@@ -178,25 +322,19 @@ class GoogleVisionOcrEngine(BaseOcrEngine):
             client = self._build_client()
             image_vision = vision.Image(content=image_bytes)
             response = client.document_text_detection(image=image_vision)
+            if getattr(response, "error", None) and response.error.message:
+                raise Exception(response.error.message)
             return self._parse_response(response, image_id, width, height)
             
-        except ImportError:
-            msg = "google-cloud-vision not installed."
-            if self.em: self.em.log("WARN", f"[{image_id}] {msg}")
-            return ImageOcrResult(image_id=image_id, error=msg)
         except Exception as e:
-            if self.em: self.em.log("ERROR", f"[{image_id}] Google Vision Error: {e}")
-            return ImageOcrResult(image_id=image_id, error=str(e))
+            if self.em: self.em.log("WARN", f"[{image_id}] Google Vision gRPC failed, falling back to REST: {e}")
+            return self._process_image_bytes_rest(image_bytes, image_id)
 
     def process_images_batch(
         self,
         image_items: list[tuple[str, bytes]],
         source_lang: str = "",
     ) -> dict[str, ImageOcrResult]:
-        """
-        OCR multiple images with Vision batch API.
-        image_items: list of (image_id, image_bytes)
-        """
         results: dict[str, ImageOcrResult] = {}
         if not image_items:
             return results
@@ -228,39 +366,37 @@ class GoogleVisionOcrEngine(BaseOcrEngine):
                         )
                     )
 
-                try:
-                    request_calls += 1
-                    batch_response = client.batch_annotate_images(requests=requests)
-                    responses = list(getattr(batch_response, "responses", []))
+                request_calls += 1
+                batch_response = client.batch_annotate_images(requests=requests)
+                responses = list(getattr(batch_response, "responses", []))
 
-                    for idx, (image_id, _bytes, width, height) in enumerate(chunk):
-                        if idx >= len(responses):
-                            results[image_id] = ImageOcrResult(
-                                image_id=image_id,
-                                width=width,
-                                height=height,
-                                error="Missing OCR response in batch result",
-                            )
-                            continue
-                        results[image_id] = self._parse_response(responses[idx], image_id, width, height)
-                except Exception as exc:
-                    if self.em:
-                        self.em.log("WARN", f"Google Vision batch failed, fallback to single-image OCR: {exc}")
-                    for image_id, image_bytes, _w, _h in chunk:
-                        results[image_id] = self.process_image_bytes(image_bytes, source_lang, image_id)
+                # If any response has an error, trigger REST fallback
+                for r in responses:
+                    if getattr(r, "error", None) and r.error.message:
+                        raise Exception(r.error.message)
+
+                for idx, (image_id, _bytes, width, height) in enumerate(chunk):
+                    if idx >= len(responses):
+                        results[image_id] = ImageOcrResult(
+                            image_id=image_id,
+                            width=width,
+                            height=height,
+                            error="Missing OCR response in batch result",
+                        )
+                        continue
+                    results[image_id] = self._parse_response(responses[idx], image_id, width, height)
 
             if self.em:
                 self.em.log(
                     "INFO",
                     f"google_vision_batch_summary: images={len(image_items)} request_calls={request_calls}",
                 )
+            return results
 
-            return results
-        except ImportError:
-            msg = "google-cloud-vision not installed."
-            for image_id, _image_bytes in image_items:
-                results[image_id] = ImageOcrResult(image_id=image_id, error=msg)
-            return results
+        except Exception as exc:
+            if self.em:
+                self.em.log("WARN", f"Google Vision batch gRPC failed, falling back to REST: {exc}")
+            return self._process_images_batch_rest(image_items)
 
     def process_images_canvas_batch(
         self,

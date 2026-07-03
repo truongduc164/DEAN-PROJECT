@@ -53,6 +53,7 @@ class ConvertWorker(QObject):
         auto_open: bool,
         pause_event,
         cancel_event,
+        extra_kwargs: dict = None
     ):
         super().__init__()
         self.file_paths = file_paths
@@ -62,6 +63,7 @@ class ConvertWorker(QObject):
         self.auto_open = auto_open
         self._pause = pause_event
         self._cancel = cancel_event
+        self.extra_kwargs = extra_kwargs or {}
 
     def run(self):
         try:
@@ -107,11 +109,30 @@ class ConvertWorker(QObject):
 
                 try:
                     if self.target_format == "docx":
-                        pdf_to_word(fp_path, out_path, log_fn=lambda lvl, msg: self.log.emit(lvl, msg))
+                        pdf_to_word(
+                            fp_path, 
+                            out_path, 
+                            log_fn=lambda lvl, msg: self.log.emit(lvl, msg),
+                            layout_mode=self.extra_kwargs.get("layout_mode", 0),
+                            parse_header_footer=self.extra_kwargs.get("parse_header_footer", True),
+                            parse_table=self.extra_kwargs.get("parse_table", True),
+                            parse_image=self.extra_kwargs.get("parse_image", True)
+                        )
                     elif self.target_format == "xlsx":
-                        pdf_to_excel(fp_path, out_path, log_fn=lambda lvl, msg: self.log.emit(lvl, msg))
+                        pdf_to_excel(
+                            fp_path, 
+                            out_path, 
+                            log_fn=lambda lvl, msg: self.log.emit(lvl, msg),
+                            merge_sheets=self.extra_kwargs.get("merge_sheets", True),
+                            auto_fit_columns=self.extra_kwargs.get("auto_fit_columns", True)
+                        )
                     elif self.target_format == "pptx":
-                        pdf_to_ppt(fp_path, out_path, log_fn=lambda lvl, msg: self.log.emit(lvl, msg))
+                        pdf_to_ppt(
+                            fp_path, 
+                            out_path, 
+                            log_fn=lambda lvl, msg: self.log.emit(lvl, msg),
+                            mode=self.extra_kwargs.get("ppt_mode", "text")
+                        )
                     else:
                         raise ValueError(f"Định dạng không hỗ trợ: {self.target_format}")
 
@@ -161,9 +182,9 @@ class PdfConvertTab(QWidget):
 
         # Config Panel
         config_group = QGroupBox("1. Cài đặt chuyển đổi (PDF Converter)")
-        config_form = QFormLayout(config_group)
-        config_form.setContentsMargins(12, 16, 12, 12)
-        config_form.setSpacing(8)
+        self.config_form = QFormLayout(config_group)
+        self.config_form.setContentsMargins(12, 16, 12, 12)
+        self.config_form.setSpacing(8)
 
         # Radio Group for Format
         self.btn_group = QButtonGroup(self)
@@ -179,12 +200,12 @@ class PdfConvertTab(QWidget):
         format_layout.addWidget(self.rbtn_word)
         format_layout.addWidget(self.rbtn_excel)
         format_layout.addWidget(self.rbtn_ppt)
-        config_form.addRow("Định dạng đầu ra:", format_layout)
+        self.config_form.addRow("Định dạng đầu ra:", format_layout)
 
         # Custom output directory
         self.chk_custom_dir = QCheckBox("Lưu vào thư mục khác (Custom Output)")
         self.chk_custom_dir.stateChanged.connect(self._on_custom_dir_toggled)
-        config_form.addRow("", self.chk_custom_dir)
+        self.config_form.addRow("", self.chk_custom_dir)
 
         custom_dir_row = QHBoxLayout()
         self.le_custom_dir = QLineEdit()
@@ -194,14 +215,47 @@ class PdfConvertTab(QWidget):
         self.btn_browse_custom_dir.clicked.connect(self._browse_custom_dir)
         custom_dir_row.addWidget(self.le_custom_dir)
         custom_dir_row.addWidget(self.btn_browse_custom_dir)
-        config_form.addRow("Thư mục lưu:", custom_dir_row)
+        self.config_form.addRow("Thư mục lưu:", custom_dir_row)
 
         self.chk_auto_open = QCheckBox("Tự động mở file sau khi xuất")
         self.chk_auto_open.setChecked(settings.get("pdf_converter.auto_open", False))
         self.chk_auto_open.stateChanged.connect(
             lambda s: settings.set("pdf_converter.auto_open", s == Qt.Checked.value)
         )
-        config_form.addRow("", self.chk_auto_open)
+        self.config_form.addRow("", self.chk_auto_open)
+
+        # Advanced Word settings (initially hidden)
+        self.cb_word_layout = QComboBox()
+        self.cb_word_layout.addItem("Dòng chảy tự nhiên (Flow layout - Dễ sửa)", 0)
+        self.cb_word_layout.addItem("Khung chữ tuyệt đối (Physical layout)", 2)
+        self.cb_word_layout.setCurrentIndex(0)
+
+        self.chk_word_header_footer = QCheckBox("Phát hiện Header & Footer")
+        self.chk_word_header_footer.setChecked(True)
+        self.chk_word_tables = QCheckBox("Nhận diện Bảng biểu")
+        self.chk_word_tables.setChecked(True)
+        self.chk_word_images = QCheckBox("Nhận diện Hình ảnh")
+        self.chk_word_images.setChecked(True)
+
+        # Advanced Excel settings (initially hidden)
+        self.chk_excel_merge = QCheckBox("Gộp tất cả trang vào một Sheet duy nhất")
+        self.chk_excel_merge.setChecked(True)
+        self.chk_excel_autofit = QCheckBox("Tự động giãn chiều rộng cột (Auto-fit)")
+        self.chk_excel_autofit.setChecked(True)
+
+        # Advanced PPT settings (initially hidden)
+        self.cb_ppt_mode = QComboBox()
+        self.cb_ppt_mode.addItem("Khối văn bản chỉnh sửa được (Editable Text)", "text")
+        self.cb_ppt_mode.addItem("Ảnh chụp trang PDF (Flat Image - Không sửa được)", "image")
+        self.cb_ppt_mode.setCurrentIndex(0)
+
+        self.config_form.addRow("Bố cục Word:", self.cb_word_layout)
+        self.config_form.addRow("Quét Word:", self.chk_word_header_footer)
+        self.config_form.addRow("", self.chk_word_tables)
+        self.config_form.addRow("", self.chk_word_images)
+        self.config_form.addRow("Bố cục Excel:", self.chk_excel_merge)
+        self.config_form.addRow("", self.chk_excel_autofit)
+        self.config_form.addRow("PowerPoint Mode:", self.cb_ppt_mode)
 
         left_layout.addWidget(config_group)
 
@@ -334,6 +388,7 @@ class PdfConvertTab(QWidget):
         self.chk_custom_dir.setChecked(use_custom_dir)
         self.le_custom_dir.setText(settings.get("pdf_converter.custom_dir_path", ""))
         self._on_custom_dir_toggled(Qt.Checked if use_custom_dir else Qt.Unchecked)
+        self._update_advanced_options_visibility()
 
     def _on_format_changed(self, button):
         fmt_id = self.btn_group.id(button)
@@ -343,6 +398,37 @@ class PdfConvertTab(QWidget):
         elif fmt_id == 2:
             fmt = "pptx"
         settings.set("pdf_converter.target_format", fmt)
+        self._update_advanced_options_visibility()
+
+    def _update_advanced_options_visibility(self):
+        target_fmt = "docx"
+        if self.rbtn_excel.isChecked():
+            target_fmt = "xlsx"
+        elif self.rbtn_ppt.isChecked():
+            target_fmt = "pptx"
+
+        is_word = (target_fmt == "docx")
+        is_excel = (target_fmt == "xlsx")
+        is_ppt = (target_fmt == "pptx")
+
+        # Word rows
+        self._set_row_visible(self.cb_word_layout, is_word)
+        self._set_row_visible(self.chk_word_header_footer, is_word)
+        self._set_row_visible(self.chk_word_tables, is_word)
+        self._set_row_visible(self.chk_word_images, is_word)
+
+        # Excel rows
+        self._set_row_visible(self.chk_excel_merge, is_excel)
+        self._set_row_visible(self.chk_excel_autofit, is_excel)
+
+        # PPT rows
+        self._set_row_visible(self.cb_ppt_mode, is_ppt)
+
+    def _set_row_visible(self, widget: QWidget, visible: bool):
+        widget.setVisible(visible)
+        label = self.config_form.labelForField(widget)
+        if label:
+            label.setVisible(visible)
 
     def _on_custom_dir_toggled(self, state=None):
         enabled = self.chk_custom_dir.isChecked()
@@ -401,6 +487,16 @@ class PdfConvertTab(QWidget):
         self._pause.set()
         self._cancel.clear()
 
+        extra_kwargs = {
+            "layout_mode": self.cb_word_layout.currentData(),
+            "parse_header_footer": self.chk_word_header_footer.isChecked(),
+            "parse_table": self.chk_word_tables.isChecked(),
+            "parse_image": self.chk_word_images.isChecked(),
+            "merge_sheets": self.chk_excel_merge.isChecked(),
+            "auto_fit_columns": self.chk_excel_autofit.isChecked(),
+            "ppt_mode": self.cb_ppt_mode.currentData(),
+        }
+
         self._thread = QThread()
         self._worker = ConvertWorker(
             file_paths=self._files.copy(),
@@ -410,6 +506,7 @@ class PdfConvertTab(QWidget):
             auto_open=auto_open,
             pause_event=self._pause,
             cancel_event=self._cancel,
+            extra_kwargs=extra_kwargs,
         )
         self._worker.moveToThread(self._thread)
 
